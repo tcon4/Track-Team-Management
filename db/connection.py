@@ -17,8 +17,11 @@ def _get_pg_config() -> dict | None:
         db_conf = st.secrets.get("database")
         if db_conf and db_conf.get("host"):
             return dict(db_conf)
-    except Exception:
-        pass
+    except FileNotFoundError:
+        pass  # no secrets file — expected in local dev without .streamlit/secrets.toml
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to load Postgres config: {e}")
     return None
 
 

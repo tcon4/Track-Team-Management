@@ -42,6 +42,9 @@ def setup() -> int:
         st.title("Athletics")
 
         schools = db.get_schools()
+        if not schools:
+            st.error("No schools found in database. Check your database connection.")
+            st.stop()
         school_names = [s["name"] for s in schools]
         selected_school_name = st.selectbox("School", school_names)
         school = next(s for s in schools if s["name"] == selected_school_name)
