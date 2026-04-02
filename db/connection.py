@@ -68,7 +68,7 @@ def release_connection(conn):
         except Exception:
             pass
     else:
-        release_connection(conn)
+        conn.close()
 
 
 def _sqlite_connect():
