@@ -43,7 +43,11 @@ def setup() -> int:
 
         schools = db.get_schools()
         if not schools:
-            st.error("No schools found in database. Check your database connection.")
+            from db.connection import _pg_config_error, _pool_error, _is_postgres
+            st.error("No schools found. Debug info:")
+            st.code(f"Postgres detected: {_is_postgres()}\n"
+                    f"Config issue: {_pg_config_error}\n"
+                    f"Pool issue: {_pool_error}")
             st.stop()
         school_names = [s["name"] for s in schools]
         selected_school_name = st.selectbox("School", school_names)

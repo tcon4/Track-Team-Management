@@ -10,40 +10,49 @@ import os
 # Connection
 # ---------------------------------------------------------------------------
 
+_pg_config_error = None  # for debug display
+
 def _get_pg_config() -> dict | None:
     """Try to load Postgres config from Streamlit secrets."""
+    global _pg_config_error
     try:
         import streamlit as st
         db_conf = st.secrets.get("database")
         if db_conf and db_conf.get("host"):
             return dict(db_conf)
+        else:
+            _pg_config_error = f"secrets found but no host: keys={list(st.secrets.keys()) if hasattr(st.secrets, 'keys') else 'N/A'}"
     except FileNotFoundError:
-        pass  # no secrets file — expected in local dev without .streamlit/secrets.toml
+        _pg_config_error = "No secrets file found"
     except Exception as e:
-        import logging
-        logging.warning(f"Failed to load Postgres config: {e}")
+        _pg_config_error = f"Exception: {e}"
     return None
 
 
 _pg_pool = None
 
 
+_pool_error = None  # for debug display
+
 def _get_pool():
     """Get or create the Postgres connection pool (cached globally)."""
-    global _pg_pool
+    global _pg_pool, _pool_error
     if _pg_pool is None:
         config = _get_pg_config()
         if config:
-            import psycopg2.pool
-            _pg_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1,
-                maxconn=5,
-                host=config["host"],
-                port=config.get("port", 5432),
-                dbname=config.get("dbname", "postgres"),
-                user=config.get("user", "postgres"),
-                password=config["password"],
-            )
+            try:
+                import psycopg2.pool
+                _pg_pool = psycopg2.pool.SimpleConnectionPool(
+                    minconn=1,
+                    maxconn=5,
+                    host=config["host"],
+                    port=config.get("port", 5432),
+                    dbname=config.get("dbname", "postgres"),
+                    user=config.get("user", "postgres"),
+                    password=config["password"],
+                )
+            except Exception as e:
+                _pool_error = f"Pool creation failed: {e}"
     return _pg_pool
 
 
