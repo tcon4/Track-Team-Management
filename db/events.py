@@ -35,6 +35,27 @@ def get_athlete_events(athlete_id: int, season_id: int) -> list[dict]:
         release_connection(conn)
 
 
+def get_all_athlete_events(season_id: int) -> dict[int, list[dict]]:
+    """Batch-fetch all event assignments for a season.
+    Returns {athlete_id: [event_dict, ...]}."""
+    conn = get_connection()
+    try:
+        rows = fetchall(conn,
+            """SELECT ea.athlete_id, te.id, te.name, te.event_type,
+                      te.gender, te.sort_order
+               FROM event_assignment ea
+               JOIN track_event te ON te.id = ea.event_id
+               WHERE ea.season_id=?
+               ORDER BY te.sort_order""",
+            (season_id,))
+        result: dict[int, list[dict]] = {}
+        for r in rows:
+            result.setdefault(r["athlete_id"], []).append(r)
+        return result
+    finally:
+        release_connection(conn)
+
+
 def assign_event(athlete_id: int, season_id: int, event_id: int) -> None:
     """Add a single event assignment. Safe to call if already assigned."""
     conn = get_connection()

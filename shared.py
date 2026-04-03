@@ -22,10 +22,6 @@ def setup() -> int:
     db.init_db()
 
     # Session state defaults
-    if "school_id" not in st.session_state:
-        schools = db.get_schools()
-        st.session_state.school_id = schools[0]["id"] if schools else None
-
     if "sport" not in st.session_state:
         st.session_state.sport = "Track"
 
@@ -37,12 +33,16 @@ def setup() -> int:
         if key not in st.session_state:
             st.session_state[key] = None
 
-    # Sidebar
+    # Sidebar — single schools fetch
+    schools = db.get_schools()
+
+    if "school_id" not in st.session_state:
+        st.session_state.school_id = schools[0]["id"] if schools else None
+
     with st.sidebar:
         _sport_label = st.session_state.get("sport", "Athletics")
         st.title(f"🏃 {_sport_label} Manager")
 
-        schools = db.get_schools()
         if not schools:
             st.error("No schools found in database. Check your database connection.")
             st.stop()

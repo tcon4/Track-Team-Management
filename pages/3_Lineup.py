@@ -133,6 +133,9 @@ season_bests_map = db.get_season_best_per_event(season_id)
 roster_all = db.get_roster(season_id)
 roster_by_id = {a["id"]: a for a in roster_all}
 
+# Batch-fetch all event assignments (avoids N+1 queries)
+all_event_assignments = db.get_all_athlete_events(season_id)
+
 # ---------------------------------------------------------------------------
 # Lineup progress
 # ---------------------------------------------------------------------------
@@ -195,7 +198,7 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                 a for a in gender_roster
                 if any(
                     ev["id"] == eid
-                    for ev in db.get_athlete_events(a["id"], season_id)
+                    for ev in all_event_assignments.get(a["id"], [])
                 )
             ]
 

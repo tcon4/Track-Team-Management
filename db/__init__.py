@@ -28,7 +28,7 @@ from db.meet import (
 
 # Events
 from db.events import (
-    get_track_events, get_athlete_events,
+    get_track_events, get_athlete_events, get_all_athlete_events,
     assign_event, set_athlete_events,
     match_event_by_number,
 )

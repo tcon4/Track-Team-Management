@@ -21,6 +21,7 @@ selected_gender = gender_map[gender_filter]
 
 roster = db.get_roster(season_id)
 season_bests = db.get_season_bests(season_id) if sport == "XC" else {}
+all_event_assignments = db.get_all_athlete_events(season_id) if sport == "Track" else {}
 
 if selected_gender:
     roster = [a for a in roster if a["gender"] == selected_gender]
@@ -51,7 +52,7 @@ else:
                        "inactive": "\u26ab"}.get(status, "\u26aa")
 
         if sport == "Track":
-            events = db.get_athlete_events(aid, season_id)
+            events = all_event_assignments.get(aid, [])
             event_str = ", ".join(e["name"] for e in events) if events else "—"
         else:
             event_str = sb

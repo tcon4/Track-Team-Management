@@ -511,8 +511,14 @@ def migrate_meet_columns() -> None:
         release_connection(conn)
 
 
+_db_initialized = False
+
 def init_db() -> None:
-    """Create tables, seed default events, run migrations, create default school."""
+    """Create tables, seed default events, run migrations, create default school.
+    Skips if already run this process."""
+    global _db_initialized
+    if _db_initialized:
+        return
     create_tables()
     seed_default_track_events()
     migrate_track_events()
@@ -526,3 +532,4 @@ def init_db() -> None:
                 ("My School", "My City"))
     finally:
         release_connection(conn)
+    _db_initialized = True
