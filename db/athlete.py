@@ -261,15 +261,19 @@ def _normalize_field_mark(val: str) -> str | None:
     return None
 
 
-_LONG_EVENTS = {"800", "800m", "1600", "1600m"}
+# Events where bare decimals represent minutes, not seconds
+_MSS_EVENTS = {"400", "400m", "800", "800m"}  # M.SS pattern (1.07 = 1:07)
+_DECIMAL_MIN_EVENTS = {"1600", "1600m"}  # true decimal minutes (6.1 = 6:06)
 
 def _normalize_time(val: str, event: str) -> str | None:
     """Normalize a time value to MM:SS.ss or SS.ss format.
-    For long events (800m+), a value like '3.28' is treated as 3:28
-    (minutes.seconds from spreadsheet formatting)."""
+    For 400m/800m, a value like '1.07' is treated as 1:07 (M.SS).
+    For 1600m, a value like '6.1' is treated as 6.1 minutes = 6:06."""
     val = val.strip()
     if not val or val.lower() in ("nan", "\u2014", "-", ""):
         return None
+
+    event_key = event.strip().lower().replace("m", "")
 
     # Already in M:SS or M:SS.ss format
     m = re.match(r"^(\d+):(\d{2}):(\d{2})$", val)
@@ -285,13 +289,25 @@ def _normalize_time(val: str, event: str) -> str | None:
     if m:
         return val
 
-    # Bare number — for long events, treat M.SS as M:SS
-    m = re.match(r"^(\d+)\.(\d{2})$", val)
-    if m and event.strip().lower().replace("m", "") in {e.replace("m", "") for e in _LONG_EVENTS}:
-        minutes = int(m.group(1))
-        seconds = int(m.group(2))
-        if minutes > 0 and seconds < 60:
-            return f"{minutes}:{seconds:02d}.00"
+    # 1600m: true decimal minutes (6.1 = 6 min 6 sec)
+    if event_key in {e.replace("m", "") for e in _DECIMAL_MIN_EVENTS}:
+        m = re.match(r"^(\d+(?:\.\d+)?)$", val)
+        if m:
+            total_minutes = float(m.group(1))
+            if 0 < total_minutes <= 20:
+                whole_minutes = int(total_minutes)
+                frac_seconds = (total_minutes - whole_minutes) * 60
+                seconds = round(frac_seconds, 2)
+                return f"{whole_minutes}:{seconds:05.2f}"
+
+    # 400m/800m: M.SS pattern (1.07 = 1:07.00)
+    if event_key in {e.replace("m", "") for e in _MSS_EVENTS}:
+        m = re.match(r"^(\d+)\.(\d{2})$", val)
+        if m:
+            minutes = int(m.group(1))
+            seconds = int(m.group(2))
+            if minutes > 0 and seconds < 60:
+                return f"{minutes}:{seconds:02d}.00"
 
     m = re.match(r"^\d+(?:\.\d+)?$", val)
     if m:

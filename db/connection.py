@@ -512,31 +512,54 @@ def migrate_meet_columns() -> None:
 
 
 def migrate_long_event_times() -> None:
-    """Fix tryout times for 800m/1600m stored as M.SS instead of M:SS.00.
-    e.g. '3.28' → '3:28.00', '1.07' → '1:07.00'"""
+    """Fix tryout times for 400m/800m/1600m stored without proper M:SS format.
+
+    400m & 800m: M.SS pattern (e.g. '1.07' → '1:07.00', '3.28' → '3:28.00')
+    1600m: true decimal minutes (e.g. '6.1' → '6:06.00', '5.75' → '5:45.00')
+    """
     import re
     conn = get_connection()
     try:
-        # Find track_event IDs for 800m and 1600m
-        long_events = fetchall(conn,
-            "SELECT id FROM track_event WHERE name IN ('800m', '1600m')")
-        if not long_events:
-            return
-
-        event_ids = [e["id"] for e in long_events]
-        for event_id in event_ids:
+        # --- 400m and 800m: M.SS pattern (minutes.seconds) ---
+        mss_events = fetchall(conn,
+            "SELECT id FROM track_event WHERE name IN ('400m', '800m')")
+        for ev in mss_events:
             results = fetchall(conn,
                 "SELECT id, result_value FROM track_result WHERE event_id=?",
-                (event_id,))
+                (ev["id"],))
             for r in results:
                 val = r["result_value"]
-                # Match M.SS pattern (no colon, looks like decimal)
+                if ":" in val:
+                    continue  # already formatted
                 m = re.match(r"^(\d+)\.(\d{2})$", val)
                 if m:
                     minutes = int(m.group(1))
                     seconds = int(m.group(2))
                     if 0 < minutes <= 20 and seconds < 60:
                         new_val = f"{minutes}:{seconds:02d}.00"
+                        execute(conn,
+                            "UPDATE track_result SET result_value=? WHERE id=?",
+                            (new_val, r["id"]))
+
+        # --- 1600m: true decimal minutes (e.g. 6.1 = 6 min 6 sec) ---
+        m16_events = fetchall(conn,
+            "SELECT id FROM track_event WHERE name='1600m'")
+        for ev in m16_events:
+            results = fetchall(conn,
+                "SELECT id, result_value FROM track_result WHERE event_id=?",
+                (ev["id"],))
+            for r in results:
+                val = r["result_value"]
+                if ":" in val:
+                    continue  # already formatted
+                m = re.match(r"^(\d+(?:\.\d+)?)$", val)
+                if m:
+                    total_minutes = float(m.group(1))
+                    if 0 < total_minutes <= 20:
+                        whole_minutes = int(total_minutes)
+                        frac_seconds = (total_minutes - whole_minutes) * 60
+                        seconds = round(frac_seconds, 2)
+                        new_val = f"{whole_minutes}:{seconds:05.2f}"
                         execute(conn,
                             "UPDATE track_result SET result_value=? WHERE id=?",
                             (new_val, r["id"]))
