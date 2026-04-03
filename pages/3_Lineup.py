@@ -62,6 +62,19 @@ def _clear_checkbox_keys():
         del st.session_state[k]
 
 
+def _on_checkbox_change(aid: int, eid: int):
+    """Callback: sync checkbox state into the working lineup set.
+    Fires BEFORE the script reruns, so progress section sees updates."""
+    cb_key = f"lu_{selected_meet_id}_{aid}_{eid}"
+    current = set(st.session_state.get(lineup_key, set()))
+    entry = (aid, eid)
+    if st.session_state.get(cb_key):
+        current.add(entry)
+    else:
+        current.discard(entry)
+    st.session_state[lineup_key] = current
+
+
 # Action buttons
 col_suggest, col_save, col_clear, col_export = st.columns([2, 2, 2, 2])
 
@@ -329,8 +342,7 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                     )
                 ):
                     aid = athlete["id"]
-                    key = (aid, eid)
-                    is_checked = key in working_set
+                    is_checked = (aid, eid) in working_set
                     sb = season_bests_map.get((aid, sb_event_id), "—")
                     total_events = athlete_counts.get(aid, 0)
                     at_limit = total_events >= MAX_PER_ATHLETE and not is_checked
@@ -343,18 +355,11 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                     if total_events >= MAX_PER_ATHLETE:
                         label += f" ⚠ {total_events}/{MAX_PER_ATHLETE} events"
 
-                    checked = st.checkbox(
+                    st.checkbox(
                         label,
                         value=is_checked,
                         disabled=at_limit,
                         key=f"lu_{selected_meet_id}_{aid}_{eid}",
+                        on_change=_on_checkbox_change,
+                        args=(aid, eid),
                     )
-
-                    if checked and key not in working_set:
-                        working_set.add(key)
-                        st.session_state[lineup_key] = working_set
-                        st.rerun()
-                    elif not checked and key in working_set:
-                        working_set.discard(key)
-                        st.session_state[lineup_key] = working_set
-                        st.rerun()
