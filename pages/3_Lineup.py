@@ -226,28 +226,41 @@ with st.container(border=True):
             a for a in roster_all
             if a["gender"] == gender_val and a["status"] == "active"
         ]
-        summary_athletes = [
+        in_lineup = [
             a for a in gender_roster
             if athlete_counts.get(a["id"], 0) > 0
         ]
-        if not summary_athletes:
+        not_in_lineup = [
+            a for a in gender_roster
+            if athlete_counts.get(a["id"], 0) == 0
+        ]
+
+        if not in_lineup and not not_in_lineup:
             continue
 
         st.markdown(f"**{gender_label}**")
-        # Display in columns for compactness
-        cols = st.columns(min(len(summary_athletes), 4))
-        for i, athlete in enumerate(sorted(
-            summary_athletes,
-            key=lambda a: -athlete_counts.get(a["id"], 0)
-        )):
-            aid = athlete["id"]
-            cnt = athlete_counts.get(aid, 0)
-            bar = "█" * cnt + "░" * (MAX_PER_ATHLETE - cnt)
-            warning = " ⚠" if cnt >= MAX_PER_ATHLETE else ""
-            cols[i % 4].caption(
-                f"{athlete['first_name']} {athlete['last_name']}\n"
-                f"{bar} {cnt}/{MAX_PER_ATHLETE}{warning}"
+
+        if in_lineup:
+            cols = st.columns(min(len(in_lineup), 4))
+            for i, athlete in enumerate(sorted(
+                in_lineup,
+                key=lambda a: -athlete_counts.get(a["id"], 0)
+            )):
+                aid = athlete["id"]
+                cnt = athlete_counts.get(aid, 0)
+                bar = "█" * cnt + "░" * (MAX_PER_ATHLETE - cnt)
+                warning = " ⚠" if cnt >= MAX_PER_ATHLETE else ""
+                cols[i % 4].caption(
+                    f"{athlete['first_name']} {athlete['last_name']}\n"
+                    f"{bar} {cnt}/{MAX_PER_ATHLETE}{warning}"
+                )
+
+        if not_in_lineup:
+            names = ", ".join(
+                f"{a['first_name']} {a['last_name']}"
+                for a in sorted(not_in_lineup, key=lambda a: (a["last_name"], a["first_name"]))
             )
+            st.caption(f"Not in lineup ({len(not_in_lineup)}): {names}")
 
 # ---------------------------------------------------------------------------
 # Lineup progress (with names)
