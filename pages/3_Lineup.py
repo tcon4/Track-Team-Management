@@ -55,11 +55,18 @@ if lineup_key not in st.session_state:
 working_set: set = set(st.session_state[lineup_key])
 
 
-def _clear_checkbox_keys():
-    """Clear all lu_ checkbox keys so Streamlit picks up new values."""
-    keys_to_clear = [k for k in st.session_state if k.startswith(f"lu_{selected_meet_id}_")]
-    for k in keys_to_clear:
-        del st.session_state[k]
+def _sync_checkbox_keys(new_set: set):
+    """Set all lu_ checkbox keys to match the new working set.
+    This ensures on_change callbacks read correct values after
+    auto-suggest or clear operations."""
+    prefix = f"lu_{selected_meet_id}_"
+    # First, uncheck all existing checkbox keys
+    for k in list(st.session_state.keys()):
+        if k.startswith(prefix):
+            st.session_state[k] = False
+    # Then check the ones in the new set
+    for aid, eid in new_set:
+        st.session_state[f"{prefix}{aid}_{eid}"] = True
 
 
 def _on_checkbox_change(aid: int, eid: int):
@@ -85,10 +92,11 @@ if col_suggest.button("Auto-suggest lineup", type="secondary"):
         max_per_relay=MAX_PER_RELAY,
         max_per_athlete=MAX_PER_ATHLETE,
     )
-    st.session_state[lineup_key] = {
+    new_set = {
         (e["athlete_id"], e["event_id"]) for e in suggestion["entries"]
     }
-    _clear_checkbox_keys()
+    st.session_state[lineup_key] = new_set
+    _sync_checkbox_keys(new_set)
 
     if suggestion["conflicts"]:
         for c in suggestion["conflicts"]:
@@ -113,7 +121,7 @@ if col_save.button("Save lineup", type="primary"):
 
 if col_clear.button("Clear lineup"):
     st.session_state[lineup_key] = set()
-    _clear_checkbox_keys()
+    _sync_checkbox_keys(set())
     st.rerun()
 
 if col_export.button("Export PDF"):
