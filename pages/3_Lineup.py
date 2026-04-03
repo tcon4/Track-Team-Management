@@ -162,6 +162,18 @@ all_event_assignments = db.get_all_athlete_events(season_id)
 all_events = db.get_track_events()
 events_by_id = {e["id"]: e for e in all_events}
 
+# Map relay events to corresponding individual event IDs for season best lookup
+# e.g. "4x100 Relay" (gender M) → find the event_id for "100m" (gender M)
+RELAY_TO_INDIVIDUAL = {"4x100 Relay": "100m", "4x200 Relay": "200m", "4x400 Relay": "400m"}
+relay_sb_event_map: dict[int, int] = {}  # relay_event_id → individual_event_id
+for e in all_events:
+    if e["event_type"] == "relay" and e["name"] in RELAY_TO_INDIVIDUAL:
+        indiv_name = RELAY_TO_INDIVIDUAL[e["name"]]
+        for ie in all_events:
+            if ie["name"] == indiv_name and ie["gender"] == e["gender"]:
+                relay_sb_event_map[e["id"]] = ie["id"]
+                break
+
 # Build mapping: event_id → list of athlete first names in working set
 event_athletes: dict[int, list[str]] = {}
 for aid, eid in working_set:
@@ -270,16 +282,25 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
         for event in events:
             eid = event["id"]
             mx = max_for_event(event)
+            is_relay = event["event_type"] == "relay"
 
-            assigned_athletes = [
-                a for a in gender_roster
-                if any(
-                    ev["id"] == eid
-                    for ev in all_event_assignments.get(a["id"], [])
-                )
-            ]
+            if is_relay:
+                # Relays: show ALL active athletes, sorted by corresponding
+                # individual event SB (e.g. 4x100 → 100m times)
+                eligible_athletes = gender_roster
+                sb_event_id = relay_sb_event_map.get(eid, eid)
+            else:
+                # Individual events: only show athletes assigned to this event
+                eligible_athletes = [
+                    a for a in gender_roster
+                    if any(
+                        ev["id"] == eid
+                        for ev in all_event_assignments.get(a["id"], [])
+                    )
+                ]
+                sb_event_id = eid
 
-            if not assigned_athletes:
+            if not eligible_athletes:
                 continue
 
             event_selected = [
@@ -296,23 +317,28 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                 f"{header_color}  **{event['name']}** — {count_label} entered",
                 expanded=len(event_selected) < mx
             ):
+                if is_relay:
+                    indiv_name = RELAY_TO_INDIVIDUAL.get(event["name"], "")
+                    st.caption(f"Sorted by {indiv_name} season best")
+
                 for athlete in sorted(
-                    assigned_athletes,
+                    eligible_athletes,
                     key=lambda a: (
-                        season_bests_map.get((a["id"], eid)) is None,
-                        season_bests_map.get((a["id"], eid), "z")
+                        season_bests_map.get((a["id"], sb_event_id)) is None,
+                        season_bests_map.get((a["id"], sb_event_id), "z")
                     )
                 ):
                     aid = athlete["id"]
                     key = (aid, eid)
                     is_checked = key in working_set
-                    sb = season_bests_map.get((aid, eid), "—")
+                    sb = season_bests_map.get((aid, sb_event_id), "—")
                     total_events = athlete_counts.get(aid, 0)
                     at_limit = total_events >= MAX_PER_ATHLETE and not is_checked
 
+                    sb_label = f"{indiv_name}: {sb}" if is_relay else f"SB: {sb}"
                     label = (
                         f"{athlete['last_name']}, {athlete['first_name']} "
-                        f"· Gr. {athlete['grade']} · SB: {sb}"
+                        f"· Gr. {athlete['grade']} · {sb_label}"
                     )
                     if total_events >= MAX_PER_ATHLETE:
                         label += f" ⚠ {total_events}/{MAX_PER_ATHLETE} events"
