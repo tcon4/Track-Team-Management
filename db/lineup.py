@@ -56,9 +56,16 @@ def get_athlete_event_counts(meet_id: int) -> dict[int, int]:
 
 
 def auto_suggest_lineup(meet_id: int, season_id: int,
-                         max_per_event: int = 3,
-                         max_per_athlete: int = 4) -> dict:
-    """Generate a suggested lineup based on season bests and event assignments."""
+                         max_per_individual: int = 3,
+                         max_per_relay: int = 5,
+                         max_per_athlete: int = 4,
+                         # Legacy support
+                         max_per_event: int | None = None) -> dict:
+    """Generate a suggested lineup based on season bests and event assignments.
+    Relays allow more entries (4 runners + 1 alternate)."""
+    if max_per_event is not None:
+        max_per_individual = max_per_event
+
     roster = get_roster(season_id)
     active_ids = {a["id"] for a in roster if a["status"] == "active"}
 
@@ -85,8 +92,16 @@ def auto_suggest_lineup(meet_id: int, season_id: int,
     conflicts = []
     counts: dict[int, int] = {}
 
-    for event in events:
+    # Process individual events first, then relays
+    # This way relay slots go to athletes who still have capacity
+    individual_events = [e for e in events if e["event_type"] != "relay"]
+    relay_events = [e for e in events if e["event_type"] == "relay"]
+
+    for event in individual_events + relay_events:
         eid = event["id"]
+        is_relay = event["event_type"] == "relay"
+        event_max = max_per_relay if is_relay else max_per_individual
+
         candidates = [
             aid for aid in assigned.get(eid, [])
             if aid in active_ids
@@ -110,7 +125,7 @@ def auto_suggest_lineup(meet_id: int, season_id: int,
         for aid in candidates:
             if counts.get(aid, 0) >= max_per_athlete:
                 continue
-            if len(selected) >= max_per_event:
+            if len(selected) >= event_max:
                 break
             selected.append(aid)
             counts[aid] = counts.get(aid, 0) + 1
@@ -118,12 +133,12 @@ def auto_suggest_lineup(meet_id: int, season_id: int,
         for aid in selected:
             entries.append({"athlete_id": aid, "event_id": eid})
 
-        if len(selected) < max_per_event and candidates:
+        if len(selected) < event_max and candidates:
             conflicts.append({
                 "event_name": event["name"],
                 "gender":     event["gender"],
                 "available":  len(selected),
-                "needed":     max_per_event,
+                "needed":     event_max,
             })
 
     return {"entries": entries, "conflicts": conflicts, "counts": counts}
@@ -194,7 +209,8 @@ def generate_lineup_pdf(meet_id: int, season_id: int,
         alignment=TA_CENTER
     )
 
-    MAX_PER_EVENT = 3
+    MAX_INDIVIDUAL = 3
+    MAX_RELAY = 5
     meet_name = meet["name"] if meet else "Lineup"
     meet_date = meet["meet_date"] if meet else ""
 
@@ -207,13 +223,15 @@ def generate_lineup_pdf(meet_id: int, season_id: int,
         if not section_events:
             return None
 
+        max_slots = MAX_RELAY if event_type == "relay" else MAX_INDIVIDUAL
+
         headers = [
             Paragraph(f'<font color="white">{e["name"]}</font>', header_style)
             for e in section_events
         ]
 
         athlete_rows = []
-        for slot in range(MAX_PER_EVENT):
+        for slot in range(max_slots):
             row = []
             for e in section_events:
                 athletes_in_event = gender_events[gender][e["id"]]
@@ -230,7 +248,7 @@ def generate_lineup_pdf(meet_id: int, season_id: int,
         col_widths = [col_width] * n_cols
 
         t = Table(data, colWidths=col_widths,
-                  rowHeights=[0.3 * inch] + [0.25 * inch] * MAX_PER_EVENT)
+                  rowHeights=[0.3 * inch] + [0.25 * inch] * max_slots)
         t.setStyle(TableStyle([
             ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
             ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
