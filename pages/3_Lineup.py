@@ -394,14 +394,23 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                     _render_athlete(athlete)
 
                 if remaining_athletes:
-                    show_key = f"show_all_{selected_meet_id}_{eid}"
-                    if st.button(
-                        f"Show full roster ({len(remaining_athletes)} more)",
-                        key=show_key,
-                    ):
-                        st.session_state[f"expanded_{show_key}"] = True
+                    exp_key = f"expanded_show_all_{selected_meet_id}_{eid}"
+                    is_expanded = st.session_state.get(exp_key, False)
 
-                    if st.session_state.get(f"expanded_{show_key}"):
+                    if is_expanded:
+                        if st.button(
+                            f"Hide full roster",
+                            key=f"hide_{selected_meet_id}_{eid}",
+                        ):
+                            st.session_state[exp_key] = False
+                            st.rerun()
                         st.caption("—")
                         for athlete in remaining_athletes:
                             _render_athlete(athlete)
+                    else:
+                        if st.button(
+                            f"Show full roster ({len(remaining_athletes)} more)",
+                            key=f"show_{selected_meet_id}_{eid}",
+                        ):
+                            st.session_state[exp_key] = True
+                            st.rerun()
