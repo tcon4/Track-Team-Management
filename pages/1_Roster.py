@@ -11,7 +11,8 @@ sport = st.session_state.sport
 school = db.get_school(st.session_state.school_id)
 school_name = school["name"] if school else "—"
 
-st.header(f"{year} {sport} Roster — {school_name}")
+st.title("Roster")
+st.caption(f"{year} {sport} — {school_name}")
 
 gender_filter = st.radio("View", ["All", "Boys (M)", "Girls (F)"],
                          horizontal=True)
@@ -39,7 +40,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 if not roster:
-    st.info("No athletes on the roster yet — add individually or import a CSV below.")
+    st.info("No athletes on the roster yet. Use one of the options below to add athletes individually, import a CSV, or upload a tryout spreadsheet.")
 else:
     for athlete in roster:
         aid = athlete["id"]
@@ -193,11 +194,11 @@ st.divider()
 # Add athlete manually
 # ---------------------------------------------------------------------------
 
-with st.expander("+ Add athlete manually"):
+with st.expander("+ Add a single athlete"):
     with st.form("add_athlete_form", clear_on_submit=True):
         ac1, ac2 = st.columns(2)
-        first = ac1.text_input("First name")
-        last = ac2.text_input("Last name")
+        first = ac1.text_input("First name", placeholder="e.g. Jane")
+        last = ac2.text_input("Last name", placeholder="e.g. Smith")
         ac3, ac4 = st.columns(2)
         grade = ac3.selectbox("Grade", [6, 7, 8])
         gender = ac4.selectbox("Gender", ["M", "F"],
@@ -218,7 +219,7 @@ with st.expander("+ Add athlete manually"):
 # CSV import
 # ---------------------------------------------------------------------------
 
-with st.expander("\u2b06 Import roster from CSV"):
+with st.expander("\u2b06 Import from CSV file"):
     st.caption(
         "Your CSV needs columns: `first_name`, `last_name`, `grade`, `gender`. "
         "Other column names are fine too — see the template."
@@ -274,7 +275,7 @@ with st.expander("\u2b06 Import roster from CSV"):
 # Tryout spreadsheet import
 # ---------------------------------------------------------------------------
 
-with st.expander("\u2b06 Import tryout spreadsheet (.xlsx)"):
+with st.expander("\u2b06 Import from tryout spreadsheet (.xlsx)"):
     st.caption(
         "Upload your tryout spreadsheet. Tabs should be named by grade/gender "
         "(e.g. **6th Girls**, **7th Boys**). "

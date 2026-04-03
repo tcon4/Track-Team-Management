@@ -39,7 +39,7 @@ def setup() -> int:
 
     # Sidebar
     with st.sidebar:
-        st.title("Athletics")
+        st.title(f"🏃 {sport} Manager" if "sport" in st.session_state else "🏃 Athletics")
 
         schools = db.get_schools()
         if not schools:

@@ -12,20 +12,37 @@ sport = st.session_state.sport
 school = db.get_school(st.session_state.school_id)
 school_name = school["name"] if school else "—"
 
-st.header(f"{year} {sport} Schedule — {school_name}")
+st.title("Schedule")
+st.caption(f"{year} {sport} — {school_name}")
 
 meets = db.get_meets(season_id)
 today = date.today().isoformat()
 
 if not meets:
-    st.info("No meets yet — add your first one below.")
+    st.info("No meets scheduled yet. Add your first meet below to start tracking your season!")
 else:
+    # Season progress bar
+    past_count = sum(1 for m in meets if m["meet_date"] < today)
+    progress_val = past_count / len(meets) if meets else 0
+    st.progress(progress_val, text=f"{past_count} of {len(meets)} meets complete")
+    st.write("")
+
+    # Find next upcoming meet
+    upcoming = [m for m in meets if m["meet_date"] >= today]
+    next_meet_id = upcoming[0]["id"] if upcoming else None
+
     for meet in meets:
         is_past = meet["meet_date"] < today
         is_host = meet["host_school_id"] == st.session_state.school_id
-        status_pill = "\U0001f3e0 You're hosting" if is_host else (
-            "\u2713 Past" if is_past else "Upcoming"
-        )
+        is_next = meet["id"] == next_meet_id
+        if is_next:
+            status_pill = "⭐ Next up"
+        elif is_host:
+            status_pill = "\U0001f3e0 You're hosting"
+        elif is_past:
+            status_pill = "\u2713 Past"
+        else:
+            status_pill = "Upcoming"
 
         with st.container(border=True):
             # Meet header row

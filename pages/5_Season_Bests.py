@@ -11,17 +11,27 @@ sport = st.session_state.sport
 school = db.get_school(st.session_state.school_id)
 school_name = school["name"] if school else "—"
 
-st.header(f"{year} {sport} Season Bests — {school_name}")
+st.title("Season Bests")
+st.caption(f"{year} {sport} — {school_name}")
 
 if sport != "Track":
-    st.info("XC season bests coming soon.")
+    st.info("XC season bests are not yet available. Switch to Track in the sidebar.")
     st.stop()
 
 bests = db.get_season_bests_track(season_id)
 
 if not bests:
-    st.info("No results recorded yet. Enter some in the Results tab.")
+    st.info("No results recorded yet.")
+    st.page_link("pages/4_Results.py", label="Enter results →")
     st.stop()
+
+pr_count = sum(1 for b in bests if b.get("is_pr"))
+athlete_count = len(set((b["first_name"], b["last_name"]) for b in bests))
+mc1, mc2 = st.columns(2)
+mc1.metric("Athletes with Results", athlete_count)
+mc2.metric("Season PRs", pr_count)
+
+st.divider()
 
 gender_tab_b, gender_tab_g = st.tabs(["Boys", "Girls"])
 

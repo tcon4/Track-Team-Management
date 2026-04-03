@@ -11,7 +11,8 @@ sport = st.session_state.sport
 school = db.get_school(st.session_state.school_id)
 school_name = school["name"] if school else "—"
 
-st.header(f"{year} {sport} Lineup Builder — {school_name}")
+st.title("Lineup Builder")
+st.caption(f"{year} {sport} — {school_name}")
 
 if sport != "Track":
     st.info("Lineup builder is for Track meets. Switch sport in the sidebar.")
@@ -20,16 +21,17 @@ if sport != "Track":
 meets = db.get_meets(season_id)
 
 if not meets:
-    st.info("No meets on the schedule yet — add one in the Schedule tab first.")
+    st.info("No meets on the schedule yet.")
+    st.page_link("pages/2_Schedule.py", label="Add a meet on the Schedule page →")
     st.stop()
 
-meet_options = {f"{m['meet_date']} \u00b7 {m['name']}": m["id"] for m in meets}
-selected_meet_label = st.selectbox("Meet", list(meet_options.keys()))
-selected_meet_id = meet_options[selected_meet_label]
-selected_meet = db.get_meet(selected_meet_id)
-
-st.caption(f"Location: {selected_meet['location']} \u00b7 "
-           f"Host: {selected_meet['host_name']}")
+with st.container(border=True):
+    meet_options = {f"{m['meet_date']} \u00b7 {m['name']}": m["id"] for m in meets}
+    selected_meet_label = st.selectbox("Meet", list(meet_options.keys()))
+    selected_meet_id = meet_options[selected_meet_label]
+    selected_meet = db.get_meet(selected_meet_id)
+    st.caption(f"Location: {selected_meet['location']}  ·  "
+               f"Host: {selected_meet['host_name']}")
 
 MAX_PER_EVENT = 3
 MAX_PER_ATHLETE = 4

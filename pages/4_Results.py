@@ -11,16 +11,18 @@ sport = st.session_state.sport
 school = db.get_school(st.session_state.school_id)
 school_name = school["name"] if school else "—"
 
-st.header(f"{year} {sport} Results — {school_name}")
+st.title("Results")
+st.caption(f"{year} {sport} — {school_name}")
 
 if sport != "Track":
-    st.info("XC results entry coming soon — finish the Track build first!")
+    st.info("XC results are not yet available. Switch to Track in the sidebar to manage results.")
     st.stop()
 
 meets = db.get_meets(season_id)
 
 if not meets:
-    st.info("No meets on the schedule yet — add one in the Schedule tab first.")
+    st.info("No meets on the schedule yet.")
+    st.page_link("pages/2_Schedule.py", label="Add a meet on the Schedule page →")
     st.stop()
 
 # Meet selector
