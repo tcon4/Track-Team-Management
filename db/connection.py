@@ -511,6 +511,39 @@ def migrate_meet_columns() -> None:
         release_connection(conn)
 
 
+def migrate_long_event_times() -> None:
+    """Fix tryout times for 800m/1600m stored as M.SS instead of M:SS.00.
+    e.g. '3.28' → '3:28.00', '1.07' → '1:07.00'"""
+    import re
+    conn = get_connection()
+    try:
+        # Find track_event IDs for 800m and 1600m
+        long_events = fetchall(conn,
+            "SELECT id FROM track_event WHERE name IN ('800m', '1600m')")
+        if not long_events:
+            return
+
+        event_ids = [e["id"] for e in long_events]
+        for event_id in event_ids:
+            results = fetchall(conn,
+                "SELECT id, result_value FROM track_result WHERE event_id=?",
+                (event_id,))
+            for r in results:
+                val = r["result_value"]
+                # Match M.SS pattern (no colon, looks like decimal)
+                m = re.match(r"^(\d+)\.(\d{2})$", val)
+                if m:
+                    minutes = int(m.group(1))
+                    seconds = int(m.group(2))
+                    if 0 < minutes <= 20 and seconds < 60:
+                        new_val = f"{minutes}:{seconds:02d}.00"
+                        execute(conn,
+                            "UPDATE track_result SET result_value=? WHERE id=?",
+                            (new_val, r["id"]))
+    finally:
+        release_connection(conn)
+
+
 _db_initialized = False
 
 def init_db() -> None:
@@ -523,6 +556,7 @@ def init_db() -> None:
     seed_default_track_events()
     migrate_track_events()
     migrate_meet_columns()
+    migrate_long_event_times()
     conn = get_connection()
     try:
         row = fetchone(conn, "SELECT COUNT(*) AS cnt FROM school")

@@ -261,12 +261,17 @@ def _normalize_field_mark(val: str) -> str | None:
     return None
 
 
+_LONG_EVENTS = {"800", "800m", "1600", "1600m"}
+
 def _normalize_time(val: str, event: str) -> str | None:
-    """Normalize a time value to MM:SS.ss or SS.ss format."""
+    """Normalize a time value to MM:SS.ss or SS.ss format.
+    For long events (800m+), a value like '3.28' is treated as 3:28
+    (minutes.seconds from spreadsheet formatting)."""
     val = val.strip()
     if not val or val.lower() in ("nan", "\u2014", "-", ""):
         return None
 
+    # Already in M:SS or M:SS.ss format
     m = re.match(r"^(\d+):(\d{2}):(\d{2})$", val)
     if m:
         minutes = int(m.group(1))
@@ -279,6 +284,14 @@ def _normalize_time(val: str, event: str) -> str | None:
     m = re.match(r"^(\d+):(\d{2}(?:\.\d+)?)$", val)
     if m:
         return val
+
+    # Bare number — for long events, treat M.SS as M:SS
+    m = re.match(r"^(\d+)\.(\d{2})$", val)
+    if m and event.strip().lower().replace("m", "") in {e.replace("m", "") for e in _LONG_EVENTS}:
+        minutes = int(m.group(1))
+        seconds = int(m.group(2))
+        if minutes > 0 and seconds < 60:
+            return f"{minutes}:{seconds:02d}.00"
 
     m = re.match(r"^\d+(?:\.\d+)?$", val)
     if m:
