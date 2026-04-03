@@ -71,12 +71,15 @@ def _sync_checkbox_keys(new_set: set):
 
 def _on_checkbox_change(aid: int, eid: int):
     """Callback: sync checkbox state into the working lineup set.
-    Fires BEFORE the script reruns, so progress section sees updates."""
+    Fires BEFORE the script reruns, so progress section sees updates.
+    Also auto-assigns the athlete to the event if newly checked."""
     cb_key = f"lu_{selected_meet_id}_{aid}_{eid}"
     current = set(st.session_state.get(lineup_key, set()))
     entry = (aid, eid)
     if st.session_state.get(cb_key):
         current.add(entry)
+        # Auto-assign event (safe to call if already assigned)
+        db.assign_event(aid, season_id, eid)
     else:
         current.discard(entry)
     st.session_state[lineup_key] = current
@@ -292,6 +295,8 @@ st.divider()
 
 gender_tab_b, gender_tab_g = st.tabs(["Boys", "Girls"])
 
+TOP_N = 15  # Show top N athletes per event; expandable for full roster
+
 for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
     with gtab:
         events = db.get_track_events(gender=gender_val)
@@ -305,25 +310,29 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
             mx = max_for_event(event)
             is_relay = event["event_type"] == "relay"
 
+            # Determine which SB to sort by
             if is_relay:
-                # Relays: show ALL active athletes, sorted by corresponding
-                # individual event SB (e.g. 4x100 → 100m times)
-                eligible_athletes = gender_roster
                 sb_event_id = relay_sb_event_map.get(eid, eid)
+                indiv_name = RELAY_TO_INDIVIDUAL.get(event["name"], "")
             else:
-                # Individual events: only show athletes assigned to this event
-                eligible_athletes = [
-                    a for a in gender_roster
-                    if any(
-                        ev["id"] == eid
-                        for ev in all_event_assignments.get(a["id"], [])
-                    )
-                ]
                 sb_event_id = eid
+                indiv_name = ""
 
-            if not eligible_athletes:
-                continue
+            # Sort entire gender roster by SB for this event
+            # Athletes already checked always sort to top
+            def _sort_key(a):
+                checked = (a["id"], eid) in working_set
+                sb = season_bests_map.get((a["id"], sb_event_id))
+                has_sb = sb is not None
+                return (
+                    0 if checked else 1,   # checked first
+                    0 if has_sb else 1,     # then those with a SB
+                    sb if has_sb else "z",  # then by SB value
+                )
 
+            sorted_roster = sorted(gender_roster, key=_sort_key)
+
+            # Count how many are currently selected
             event_selected = [
                 aid for aid, e in working_set if e == eid
             ]
@@ -339,16 +348,25 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                 expanded=len(event_selected) < mx
             ):
                 if is_relay:
-                    indiv_name = RELAY_TO_INDIVIDUAL.get(event["name"], "")
                     st.caption(f"Sorted by {indiv_name} season best")
 
-                for athlete in sorted(
-                    eligible_athletes,
-                    key=lambda a: (
-                        season_bests_map.get((a["id"], sb_event_id)) is None,
-                        season_bests_map.get((a["id"], sb_event_id), "z")
-                    )
-                ):
+                # Split into top N and the rest
+                top_athletes = sorted_roster[:TOP_N]
+                remaining_athletes = sorted_roster[TOP_N:]
+
+                # Always include any checked athletes even if beyond top N
+                checked_beyond = [
+                    a for a in remaining_athletes
+                    if (a["id"], eid) in working_set
+                ]
+                if checked_beyond:
+                    top_athletes = top_athletes + checked_beyond
+                    remaining_athletes = [
+                        a for a in remaining_athletes
+                        if (a["id"], eid) not in working_set
+                    ]
+
+                def _render_athlete(athlete):
                     aid = athlete["id"]
                     is_checked = (aid, eid) in working_set
                     sb = season_bests_map.get((aid, sb_event_id), "—")
@@ -371,3 +389,19 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                         on_change=_on_checkbox_change,
                         args=(aid, eid),
                     )
+
+                for athlete in top_athletes:
+                    _render_athlete(athlete)
+
+                if remaining_athletes:
+                    show_key = f"show_all_{selected_meet_id}_{eid}"
+                    if st.button(
+                        f"Show full roster ({len(remaining_athletes)} more)",
+                        key=show_key,
+                    ):
+                        st.session_state[f"expanded_{show_key}"] = True
+
+                    if st.session_state.get(f"expanded_{show_key}"):
+                        st.caption("—")
+                        for athlete in remaining_athletes:
+                            _render_athlete(athlete)
