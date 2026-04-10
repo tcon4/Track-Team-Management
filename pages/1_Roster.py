@@ -110,18 +110,8 @@ else:
                     st.caption("No results recorded yet this season.")
 
                 if history:
-                    st.markdown("**Meet history**")
-                    for h in history:
-                        pr_flag = " \u2713 PR" if h["is_pr"] else ""
-                        place_str = f" \u00b7 {shared.format_place(h['place'])}" if h["place"] else ""
-                        st.caption(
-                            f"{h['meet_date']} — {h['meet_name']} \u00b7 "
-                            f"{h['event_name']} \u00b7 "
-                            f"{h['result_value']}{place_str}{pr_flag}"
-                        )
-
-                    # --- Season trends chart ---
-                    # Group history by event, parse numeric values
+                    # Build chart data before layout
+                    import math
                     chart_rows = []
                     for h in history:
                         try:
@@ -136,29 +126,45 @@ else:
                         except (ValueError, ZeroDivisionError):
                             continue
 
+                    chartable = []
                     if chart_rows:
-                        df = pd.DataFrame(chart_rows)
-                        event_counts = df["Event"].value_counts()
+                        chart_df = pd.DataFrame(chart_rows)
+                        event_counts = chart_df["Event"].value_counts()
                         chartable = event_counts[event_counts >= 2].index.tolist()
 
-                        if chartable:
+                    # Side-by-side: history left, trends right
+                    col_hist, col_trends = st.columns(
+                        [1, 1] if chartable else [1, 0.01]
+                    )
+
+                    with col_hist:
+                        st.markdown("**Meet history**")
+                        for h in history:
+                            pr_flag = " \u2713 PR" if h["is_pr"] else ""
+                            place_str = f" \u00b7 {shared.format_place(h['place'])}" if h["place"] else ""
+                            st.caption(
+                                f"{h['meet_date']} — {h['meet_name']} \u00b7 "
+                                f"{h['event_name']} \u00b7 "
+                                f"{h['result_value']}{place_str}{pr_flag}"
+                            )
+
+                    if chartable:
+                        with col_trends:
                             st.markdown("**Season trends**")
                             for ev_name in chartable:
                                 ev_df = (
-                                    df[df["Event"] == ev_name]
+                                    chart_df[chart_df["Event"] == ev_name]
                                     .sort_values("Date")
                                     .reset_index(drop=True)
                                 )
                                 ev_df["Order"] = range(len(ev_df))
 
-                                # Determine event direction
                                 is_field = any(
                                     h["event_type"] == "field"
                                     for h in history
                                     if h["event_name"] == ev_name
                                 )
 
-                                # Y-axis: auto-scaled with padding
                                 y_min = ev_df["Seconds"].min()
                                 y_max = ev_df["Seconds"].max()
                                 padding = max((y_max - y_min) * 0.3, 2)
@@ -167,18 +173,10 @@ else:
                                     reverse=not is_field,
                                 )
 
-                                # Format labels for tooltip and y-axis
                                 ev_df["Time"] = ev_df["Seconds"].apply(_fmt_time)
 
-                                # Build tick values spanning the range
                                 span = y_max - y_min
-                                if span > 30:
-                                    step = 15
-                                elif span > 10:
-                                    step = 5
-                                else:
-                                    step = 2
-                                import math
+                                step = 15 if span > 30 else (5 if span > 10 else 2)
                                 tick_start = math.floor(y_min / step) * step
                                 tick_end = math.ceil(y_max / step) * step + step
                                 tick_vals = list(range(int(tick_start), int(tick_end), int(step)))
@@ -191,7 +189,10 @@ else:
                                             "Meet:N",
                                             sort=alt.SortField("Order"),
                                             title=None,
-                                            axis=alt.Axis(labelAngle=-30),
+                                            axis=alt.Axis(
+                                                labelAngle=-30,
+                                                labelFontSize=9,
+                                            ),
                                         ),
                                         y=alt.Y(
                                             "Seconds:Q",
@@ -213,7 +214,7 @@ else:
                                             alt.Tooltip("Time:N", title="Result"),
                                         ],
                                     )
-                                    .properties(height=200)
+                                    .properties(height=140)
                                 )
                                 st.altair_chart(chart, use_container_width=True)
 
