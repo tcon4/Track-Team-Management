@@ -1,8 +1,10 @@
 """Roster & Events page."""
 
 import streamlit as st
+import pandas as pd
 import db
 import shared
+from db.results import _parse_result
 
 season_id = shared.setup()
 
@@ -107,6 +109,49 @@ else:
                             f"{h['event_name']} \u00b7 "
                             f"{h['result_value']}{place_str}{pr_flag}"
                         )
+
+                    # --- Season trends chart ---
+                    # Group history by event, parse numeric values
+                    chart_rows = []
+                    for h in history:
+                        try:
+                            val = _parse_result(h["result_value"])
+                            chart_rows.append({
+                                "Meet": h["meet_name"],
+                                "Date": h["meet_date"],
+                                "Event": h["event_name"],
+                                "Seconds": val,
+                                "Result": h["result_value"],
+                            })
+                        except (ValueError, ZeroDivisionError):
+                            continue
+
+                    if chart_rows:
+                        df = pd.DataFrame(chart_rows)
+                        # Only chart events with 2+ data points
+                        event_counts = df["Event"].value_counts()
+                        chartable = event_counts[event_counts >= 2].index.tolist()
+
+                        if chartable:
+                            st.markdown("**Season trends**")
+                            for ev_name in chartable:
+                                ev_df = df[df["Event"] == ev_name].sort_values("Date")
+                                is_field = ev_df["Seconds"].iloc[-1] > ev_df["Seconds"].iloc[0] if len(ev_df) > 1 else False
+
+                                # Format y-axis labels as times for running events
+                                st.caption(ev_name)
+                                st.line_chart(
+                                    ev_df.set_index("Meet")["Seconds"],
+                                    height=180,
+                                )
+                                # Show improvement
+                                first = ev_df["Seconds"].iloc[0]
+                                last = ev_df["Seconds"].iloc[-1]
+                                diff = last - first
+                                if diff < 0:
+                                    st.caption(f"Improved by {abs(diff):.2f}s")
+                                elif diff > 0 and not is_field:
+                                    st.caption(f"Slower by {diff:.2f}s")
 
                 if st.button("Close profile", key=f"close_profile_{aid}"):
                     st.session_state.profile_athlete = None

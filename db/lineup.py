@@ -92,20 +92,33 @@ def auto_suggest_lineup(meet_id: int, season_id: int,
     conflicts = []
     counts: dict[int, int] = {}
 
-    # Process individual events first, then relays
-    # This way relay slots go to athletes who still have capacity
-    individual_events = [e for e in events if e["event_type"] != "relay"]
-    relay_events = [e for e in events if e["event_type"] == "relay"]
+    # Build candidate lists per event (active + assigned)
+    event_candidates: dict[int, list[int]] = {}
+    for event in events:
+        eid = event["id"]
+        event_candidates[eid] = [
+            aid for aid in assigned.get(eid, [])
+            if aid in active_ids
+        ]
 
-    for event in individual_events + relay_events:
+    # Scarcity-based ordering: fill events with fewest eligible candidates
+    # first, so scarce athletes aren't wasted on events with many options.
+    # Within the same scarcity level, process individual events before relays
+    # so relay slots go to athletes who still have capacity.
+    def event_priority(event: dict) -> tuple:
+        eid = event["id"]
+        is_relay = event["event_type"] == "relay"
+        n_candidates = len(event_candidates.get(eid, []))
+        return (n_candidates, 1 if is_relay else 0, event["sort_order"])
+
+    sorted_events = sorted(events, key=event_priority)
+
+    for event in sorted_events:
         eid = event["id"]
         is_relay = event["event_type"] == "relay"
         event_max = max_per_relay if is_relay else max_per_individual
 
-        candidates = [
-            aid for aid in assigned.get(eid, [])
-            if aid in active_ids
-        ]
+        candidates = event_candidates.get(eid, [])
 
         def sort_key(aid: int) -> tuple:
             best = bests.get((aid, eid))
