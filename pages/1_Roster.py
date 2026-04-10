@@ -101,13 +101,14 @@ else:
                 if event_str != "—":
                     st.caption(f"Events: {event_str}")
 
-                if bests:
-                    st.markdown("**Season bests**")
-                    for ev, data in bests.items():
-                        pr_flag = " \u2713 PR" if data["has_pr"] else ""
-                        st.write(f"{ev}: **{data['result_value']}**{pr_flag}")
-                else:
-                    st.caption("No results recorded yet this season.")
+                if not history:
+                    if bests:
+                        st.markdown("**Season bests**")
+                        for ev, data in bests.items():
+                            pr_flag = " \u2713 PR" if data["has_pr"] else ""
+                            st.write(f"{ev}: **{data['result_value']}**{pr_flag}")
+                    else:
+                        st.caption("No results recorded yet this season.")
 
                 if history:
                     # Build chart data before layout
@@ -132,12 +133,18 @@ else:
                         event_counts = chart_df["Event"].value_counts()
                         chartable = event_counts[event_counts >= 2].index.tolist()
 
-                    # Side-by-side: history left, trends right
-                    col_hist, col_trends = st.columns(
+                    # Side-by-side: bests + history left, trends right
+                    col_left, col_right = st.columns(
                         [1, 1] if chartable else [1, 0.01]
                     )
 
-                    with col_hist:
+                    with col_left:
+                        if bests:
+                            st.markdown("**Season bests**")
+                            for ev, data in bests.items():
+                                pr_flag = " \u2713 PR" if data["has_pr"] else ""
+                                st.write(f"{ev}: **{data['result_value']}**{pr_flag}")
+
                         st.markdown("**Meet history**")
                         for h in history:
                             pr_flag = " \u2713 PR" if h["is_pr"] else ""
@@ -149,7 +156,7 @@ else:
                             )
 
                     if chartable:
-                        with col_trends:
+                        with col_right:
                             st.markdown("**Season trends**")
                             for ev_name in chartable:
                                 ev_df = (
