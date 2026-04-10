@@ -2,9 +2,19 @@
 
 import streamlit as st
 import pandas as pd
+import altair as alt
 import db
 import shared
 from db.results import _parse_result
+
+
+def _fmt_time(seconds: float) -> str:
+    """Format seconds as M:SS or S.ss for axis labels."""
+    if seconds >= 60:
+        m = int(seconds // 60)
+        s = seconds % 60
+        return f"{m}:{s:05.2f}"
+    return f"{seconds:.2f}"
 
 season_id = shared.setup()
 
@@ -128,30 +138,98 @@ else:
 
                     if chart_rows:
                         df = pd.DataFrame(chart_rows)
-                        # Only chart events with 2+ data points
                         event_counts = df["Event"].value_counts()
                         chartable = event_counts[event_counts >= 2].index.tolist()
 
                         if chartable:
                             st.markdown("**Season trends**")
                             for ev_name in chartable:
-                                ev_df = df[df["Event"] == ev_name].sort_values("Date")
-                                is_field = ev_df["Seconds"].iloc[-1] > ev_df["Seconds"].iloc[0] if len(ev_df) > 1 else False
-
-                                # Format y-axis labels as times for running events
-                                st.caption(ev_name)
-                                st.line_chart(
-                                    ev_df.set_index("Meet")["Seconds"],
-                                    height=180,
+                                ev_df = (
+                                    df[df["Event"] == ev_name]
+                                    .sort_values("Date")
+                                    .reset_index(drop=True)
                                 )
-                                # Show improvement
+                                ev_df["Order"] = range(len(ev_df))
+
+                                # Determine event direction
+                                is_field = any(
+                                    h["event_type"] == "field"
+                                    for h in history
+                                    if h["event_name"] == ev_name
+                                )
+
+                                # Y-axis: auto-scaled with padding
+                                y_min = ev_df["Seconds"].min()
+                                y_max = ev_df["Seconds"].max()
+                                padding = max((y_max - y_min) * 0.3, 2)
+                                y_scale = alt.Scale(
+                                    domain=[y_min - padding, y_max + padding],
+                                    reverse=not is_field,
+                                )
+
+                                # Format labels for tooltip and y-axis
+                                ev_df["Time"] = ev_df["Seconds"].apply(_fmt_time)
+
+                                # Build tick values spanning the range
+                                span = y_max - y_min
+                                if span > 30:
+                                    step = 15
+                                elif span > 10:
+                                    step = 5
+                                else:
+                                    step = 2
+                                import math
+                                tick_start = math.floor(y_min / step) * step
+                                tick_end = math.ceil(y_max / step) * step + step
+                                tick_vals = list(range(int(tick_start), int(tick_end), int(step)))
+
+                                chart = (
+                                    alt.Chart(ev_df)
+                                    .mark_line(point=True, strokeWidth=2)
+                                    .encode(
+                                        x=alt.X(
+                                            "Meet:N",
+                                            sort=alt.SortField("Order"),
+                                            title=None,
+                                            axis=alt.Axis(labelAngle=-30),
+                                        ),
+                                        y=alt.Y(
+                                            "Seconds:Q",
+                                            scale=y_scale,
+                                            title=ev_name,
+                                            axis=alt.Axis(
+                                                values=tick_vals,
+                                                labelExpr=(
+                                                    "datum.value >= 60 "
+                                                    "? floor(datum.value / 60) + ':' "
+                                                    "+ (datum.value % 60 < 10 ? '0' : '') "
+                                                    "+ format(datum.value % 60, '.0f') "
+                                                    ": format(datum.value, '.1f')"
+                                                ),
+                                            ),
+                                        ),
+                                        tooltip=[
+                                            alt.Tooltip("Meet:N"),
+                                            alt.Tooltip("Time:N", title="Result"),
+                                        ],
+                                    )
+                                    .properties(height=200)
+                                )
+                                st.altair_chart(chart, use_container_width=True)
+
                                 first = ev_df["Seconds"].iloc[0]
                                 last = ev_df["Seconds"].iloc[-1]
                                 diff = last - first
-                                if diff < 0:
-                                    st.caption(f"Improved by {abs(diff):.2f}s")
-                                elif diff > 0 and not is_field:
-                                    st.caption(f"Slower by {diff:.2f}s")
+                                if is_field:
+                                    if diff > 0:
+                                        st.caption(f"Improved by {_fmt_time(abs(diff))}")
+                                    elif diff < 0:
+                                        st.caption(f"Down by {_fmt_time(abs(diff))}")
+                                else:
+                                    if diff < 0:
+                                        st.caption(f"Improved by {_fmt_time(abs(diff))}")
+                                    elif diff > 0:
+                                        st.caption(f"Slower by {_fmt_time(abs(diff))}")
 
                 if st.button("Close profile", key=f"close_profile_{aid}"):
                     st.session_state.profile_athlete = None
