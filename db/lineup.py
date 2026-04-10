@@ -364,27 +364,19 @@ def generate_checklist_pdf(meet_id: int, season_id: int,
         fontSize=10, fontName="Helvetica",
         alignment=TA_CENTER, spaceAfter=8
     )
-    section_style = ParagraphStyle(
-        "cl_section", parent=styles["Normal"],
-        fontSize=11, fontName="Helvetica-Bold",
-        spaceBefore=12, spaceAfter=4
-    )
     name_style = ParagraphStyle(
         "cl_name", parent=styles["Normal"],
-        fontSize=10, fontName="Helvetica-Bold",
+        fontSize=9, fontName="Helvetica-Bold",
     )
     event_style = ParagraphStyle(
         "cl_event", parent=styles["Normal"],
-        fontSize=9, fontName="Helvetica",
+        fontSize=8, fontName="Helvetica",
     )
-    check_style = ParagraphStyle(
-        "cl_check", parent=styles["Normal"],
-        fontSize=9, fontName="Helvetica",
-        alignment=TA_CENTER,
-    )
+    # White text for header cells on dark background
     header_style = ParagraphStyle(
         "cl_header", parent=styles["Normal"],
-        fontSize=9, fontName="Helvetica-Bold",
+        fontSize=8, fontName="Helvetica-Bold",
+        textColor=colors.white,
     )
 
     meet_name = meet["name"] if meet else "Meet"
@@ -394,7 +386,7 @@ def generate_checklist_pdf(meet_id: int, season_id: int,
     doc = SimpleDocTemplate(
         buf,
         pagesize=letter,
-        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+        leftMargin=0.5 * inch, rightMargin=0.5 * inch,
         topMargin=0.5 * inch, bottomMargin=0.5 * inch,
     )
 
@@ -424,17 +416,16 @@ def generate_checklist_pdf(meet_id: int, season_id: int,
             )
         )
 
-        # Build table: [#, Name, Events, ✓ columns for each event]
-        # Simpler approach: Name | Events (comma list) | checkbox columns
         max_events = max(len(evts) for evts in athlete_map.values())
 
+        # Header row — white text via style
         header_row = [
-            Paragraph("<b>#</b>", header_style),
-            Paragraph("<b>Athlete</b>", header_style),
+            Paragraph("#", header_style),
+            Paragraph("Athlete", header_style),
         ]
         for i in range(max_events):
-            header_row.append(Paragraph(f"<b>Event {i+1}</b>", header_style))
-        header_row.append(Paragraph("<b>\u2713</b>", header_style))
+            header_row.append(Paragraph(f"Event {i+1}", header_style))
+        header_row.append(Paragraph("", header_style))  # checkbox col
 
         data = [header_row]
         for idx, aid in enumerate(sorted_aids, 1):
@@ -452,40 +443,59 @@ def generate_checklist_pdf(meet_id: int, season_id: int,
                     row.append(Paragraph(event_list[i], event_style))
                 else:
                     row.append(Paragraph("", event_style))
-            # Checkbox column (empty box for coach to check off)
-            row.append(Paragraph("\u25a1", check_style))
+            # Empty cell — the BOX style below draws the checkbox
+            row.append(Paragraph("", event_style))
             data.append(row)
 
-        n_cols = 2 + max_events + 1  # #, Name, events..., checkbox
-        # Column widths: narrow #, wide name, medium events, narrow check
-        num_width = 0.3 * inch
-        name_width = 1.8 * inch
-        check_width = 0.4 * inch
-        remaining = 7.3 * inch - num_width - name_width - check_width
-        event_width = remaining / max(max_events, 1)
+        # Column widths — compact layout
+        num_width = 0.25 * inch
+        name_width = 1.7 * inch
+        check_width = 0.3 * inch
+        usable = 7.5 * inch - num_width - name_width - check_width
+        event_width = min(usable / max(max_events, 1), 1.3 * inch)
         col_widths = (
             [num_width, name_width]
             + [event_width] * max_events
             + [check_width]
         )
 
-        t = Table(data, colWidths=col_widths, repeatRows=1)
-        t.setStyle(TableStyle([
+        row_height = 0.22 * inch
+        t = Table(
+            data, colWidths=col_widths, repeatRows=1,
+            rowHeights=[0.25 * inch] + [row_height] * len(sorted_aids),
+        )
+
+        # Build style commands
+        style_cmds = [
             ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
-            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
-            ("ALIGN",         (0, 0), (0, -1), "CENTER"),  # # column
-            ("ALIGN",         (-1, 0), (-1, -1), "CENTER"),  # check column
+            ("ALIGN",         (0, 0), (0, -1), "CENTER"),
+            ("ALIGN",         (-1, 0), (-1, -1), "CENTER"),
             ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("GRID",          (0, 0), (-2, -1), 0.5, colors.HexColor("#cccccc")),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1),
              [colors.white, colors.HexColor("#f5f5f5")]),
-            ("FONTSIZE",      (0, 0), (-1, -1), 9),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ]))
+            ("TOPPADDING",    (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 3),
+        ]
+
+        # Draw open checkbox squares in the last column for each data row
+        check_col = 2 + max_events  # index of checkbox column
+        for row_idx in range(1, len(sorted_aids) + 1):
+            style_cmds.append(
+                ("BOX", (check_col, row_idx), (check_col, row_idx),
+                 1.0, colors.HexColor("#666666"))
+            )
+            style_cmds.append(
+                ("BACKGROUND", (check_col, row_idx), (check_col, row_idx),
+                 colors.white)
+            )
+
+        t.setStyle(TableStyle(style_cmds))
 
         story.append(t)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 10))
         story.append(Paragraph(
             f"{len(sorted_aids)} athletes  \u00b7  "
             f"{sum(len(athlete_map[a]) for a in sorted_aids)} total entries",

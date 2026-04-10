@@ -285,19 +285,28 @@ def get_season_bests(season_id: int) -> dict[int, str]:
 
 
 def get_athlete_meet_counts(season_id: int) -> dict[int, int]:
-    """Returns {athlete_id: number_of_meets_with_results} for the season.
+    """Returns {athlete_id: number_of_meets_participated} for the season.
 
-    Excludes the 'Tryouts' pseudo-meet so only real competitions count.
+    Counts meets where athlete had results OR was in the lineup (captures
+    relay-only athletes). Excludes the 'Tryouts' pseudo-meet.
     """
     conn = get_connection()
     try:
         rows = fetchall(conn,
-            """SELECT tr.athlete_id, COUNT(DISTINCT tr.meet_id) AS meet_count
-               FROM track_result tr
-               JOIN meet m ON m.id = tr.meet_id
-               WHERE m.season_id = ? AND m.name != 'Tryouts'
-               GROUP BY tr.athlete_id""",
-            (season_id,))
+            """SELECT athlete_id, COUNT(DISTINCT meet_id) AS meet_count
+               FROM (
+                   SELECT tr.athlete_id, tr.meet_id
+                   FROM track_result tr
+                   JOIN meet m ON m.id = tr.meet_id
+                   WHERE m.season_id = ? AND m.name != 'Tryouts'
+                   UNION
+                   SELECT le.athlete_id, le.meet_id
+                   FROM lineup_entry le
+                   JOIN meet m ON m.id = le.meet_id
+                   WHERE m.season_id = ? AND m.name != 'Tryouts'
+               ) combined
+               GROUP BY athlete_id""",
+            (season_id, season_id))
     finally:
         release_connection(conn)
     return {r["athlete_id"]: r["meet_count"] for r in rows}
