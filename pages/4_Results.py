@@ -25,12 +25,32 @@ if not meets:
     st.page_link("pages/2_Schedule.py", label="Add a meet on the Schedule page →")
     st.stop()
 
-# Meet selector
-meet_options = {f"{m['meet_date']} \u00b7 {m['name']}": m["id"] for m in meets}
-selected_meet_label = st.selectbox(
-    "Meet", list(meet_options.keys()), key="results_meet"
-)
-selected_meet_id = meet_options[selected_meet_label]
+# Meet selector — must confirm before showing entry forms
+confirm_key = "results_confirmed_meet"
+
+with st.container(border=True):
+    meet_options = {f"{m['meet_date']} · {m['name']}": m["id"] for m in meets}
+    selected_meet_label = st.selectbox(
+        "Select a meet", list(meet_options.keys()), key="results_meet"
+    )
+    selected_meet_id = meet_options[selected_meet_label]
+    selected_meet_obj = db.get_meet(selected_meet_id)
+    if selected_meet_obj:
+        st.caption(f"Location: {selected_meet_obj['location']}  ·  "
+                   f"Host: {selected_meet_obj.get('host_name', '—')}")
+
+    confirmed_id = st.session_state.get(confirm_key)
+    if confirmed_id == selected_meet_id:
+        if st.button("Change meet", key="results_change_meet"):
+            st.session_state[confirm_key] = None
+            st.rerun()
+    else:
+        if st.button("Load results", type="primary", key="results_confirm_meet"):
+            st.session_state[confirm_key] = selected_meet_id
+            st.rerun()
+
+if st.session_state.get(confirm_key) != selected_meet_id:
+    st.stop()
 
 entry_mode = st.radio(
     "Entry method",

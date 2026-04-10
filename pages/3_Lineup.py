@@ -1,6 +1,7 @@
 """Lineup Builder page."""
 
 import streamlit as st
+from datetime import date
 import db
 import shared
 
@@ -25,13 +26,63 @@ if not meets:
     st.page_link("pages/2_Schedule.py", label="Add a meet on the Schedule page →")
     st.stop()
 
+# ---------------------------------------------------------------------------
+# Meet selector — must confirm before anything else shows
+# ---------------------------------------------------------------------------
+
+confirm_key = "lineup_confirmed_meet"
+
 with st.container(border=True):
     meet_options = {f"{m['meet_date']} · {m['name']}": m["id"] for m in meets}
-    selected_meet_label = st.selectbox("Meet", list(meet_options.keys()))
+    selected_meet_label = st.selectbox("Select a meet", list(meet_options.keys()))
     selected_meet_id = meet_options[selected_meet_label]
     selected_meet = db.get_meet(selected_meet_id)
     st.caption(f"Location: {selected_meet['location']}  ·  "
                f"Host: {selected_meet['host_name']}")
+
+    # Check if this meet is in the past
+    today = date.today().isoformat()
+    is_past = selected_meet["meet_date"] < today
+
+    if is_past:
+        st.info(f"This meet has passed ({selected_meet['meet_date']}).")
+
+    # Confirm / change meet button
+    confirmed_id = st.session_state.get(confirm_key)
+    if confirmed_id == selected_meet_id:
+        if st.button("Change meet", key="change_meet"):
+            st.session_state[confirm_key] = None
+            st.rerun()
+    else:
+        if st.button("Load lineup", type="primary", key="confirm_meet"):
+            st.session_state[confirm_key] = selected_meet_id
+            st.rerun()
+
+# Stop here if meet not confirmed
+if st.session_state.get(confirm_key) != selected_meet_id:
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# Read-only mode for past meets (with unlock override)
+# ---------------------------------------------------------------------------
+
+unlock_key = f"unlock_past_{selected_meet_id}"
+read_only = is_past and not st.session_state.get(unlock_key, False)
+
+if is_past:
+    if read_only:
+        if st.button("Unlock for editing (what-if mode)"):
+            st.session_state[unlock_key] = True
+            st.rerun()
+    else:
+        st.warning("What-if mode — this meet has passed. Changes can still be saved.")
+        if st.button("Lock editing"):
+            st.session_state[unlock_key] = False
+            st.rerun()
+
+# ---------------------------------------------------------------------------
+# Constants & helpers
+# ---------------------------------------------------------------------------
 
 MAX_PER_INDIVIDUAL = 3
 MAX_PER_RELAY = 5
@@ -56,84 +107,85 @@ working_set: set = set(st.session_state[lineup_key])
 
 
 def _sync_checkbox_keys(new_set: set):
-    """Set all lu_ checkbox keys to match the new working set.
-    This ensures on_change callbacks read correct values after
-    auto-suggest or clear operations."""
+    """Set all lu_ checkbox keys to match the new working set."""
     prefix = f"lu_{selected_meet_id}_"
-    # First, uncheck all existing checkbox keys
     for k in list(st.session_state.keys()):
         if k.startswith(prefix):
             st.session_state[k] = False
-    # Then check the ones in the new set
     for aid, eid in new_set:
         st.session_state[f"{prefix}{aid}_{eid}"] = True
 
 
 def _on_checkbox_change(aid: int, eid: int):
-    """Callback: sync checkbox state into the working lineup set.
-    Fires BEFORE the script reruns, so progress section sees updates.
-    Also auto-assigns the athlete to the event if newly checked."""
+    """Callback: sync checkbox state into the working lineup set."""
     cb_key = f"lu_{selected_meet_id}_{aid}_{eid}"
     current = set(st.session_state.get(lineup_key, set()))
     entry = (aid, eid)
     if st.session_state.get(cb_key):
         current.add(entry)
-        # Auto-assign event (safe to call if already assigned)
         db.assign_event(aid, season_id, eid)
     else:
         current.discard(entry)
     st.session_state[lineup_key] = current
 
 
+# ---------------------------------------------------------------------------
 # Action buttons
-col_suggest, col_save, col_clear, col_export = st.columns([2, 2, 2, 2])
+# ---------------------------------------------------------------------------
 
-if col_suggest.button("Auto-suggest lineup", type="secondary"):
-    suggestion = db.auto_suggest_lineup(
-        selected_meet_id, season_id,
-        max_per_individual=MAX_PER_INDIVIDUAL,
-        max_per_relay=MAX_PER_RELAY,
-        max_per_athlete=MAX_PER_ATHLETE,
-    )
-    new_set = {
-        (e["athlete_id"], e["event_id"]) for e in suggestion["entries"]
-    }
-    st.session_state[lineup_key] = new_set
-    _sync_checkbox_keys(new_set)
+if not read_only:
+    col_suggest, col_save, col_clear, col_export = st.columns([2, 2, 2, 2])
 
-    if suggestion["conflicts"]:
-        for c in suggestion["conflicts"]:
-            gender_label = "Boys" if c["gender"] == "M" else "Girls"
-            st.warning(
-                f"⚠ {c['event_name']} ({gender_label}): only "
-                f"{c['available']} of {c['needed']} slots filled — "
-                f"not enough athletes assigned or available."
-            )
-    else:
-        st.success("Lineup suggested — review and save when ready.")
-    st.rerun()
+    if col_suggest.button("Auto-suggest lineup", type="secondary"):
+        suggestion = db.auto_suggest_lineup(
+            selected_meet_id, season_id,
+            max_per_individual=MAX_PER_INDIVIDUAL,
+            max_per_relay=MAX_PER_RELAY,
+            max_per_athlete=MAX_PER_ATHLETE,
+        )
+        new_set = {
+            (e["athlete_id"], e["event_id"]) for e in suggestion["entries"]
+        }
+        st.session_state[lineup_key] = new_set
+        _sync_checkbox_keys(new_set)
 
-if col_save.button("Save lineup", type="primary"):
-    entries = [
-        {"athlete_id": aid, "event_id": eid}
-        for aid, eid in st.session_state[lineup_key]
-    ]
-    db.save_lineup(selected_meet_id, entries)
-    st.success("Lineup saved.")
-    st.rerun()
+        if suggestion["conflicts"]:
+            for c in suggestion["conflicts"]:
+                gender_label = "Boys" if c["gender"] == "M" else "Girls"
+                st.warning(
+                    f"⚠ {c['event_name']} ({gender_label}): only "
+                    f"{c['available']} of {c['needed']} slots filled — "
+                    f"not enough athletes assigned or available."
+                )
+        else:
+            st.success("Lineup suggested — review and save when ready.")
+        st.rerun()
 
-if col_clear.button("Clear lineup"):
-    st.session_state[lineup_key] = set()
-    _sync_checkbox_keys(set())
-    st.rerun()
+    if col_save.button("Save lineup", type="primary"):
+        entries = [
+            {"athlete_id": aid, "event_id": eid}
+            for aid, eid in st.session_state[lineup_key]
+        ]
+        db.save_lineup(selected_meet_id, entries)
+        st.success("Lineup saved.")
+        st.rerun()
 
-if col_export.button("Export PDF"):
-    st.session_state["export_lineup_meet"] = selected_meet_id
+    if col_clear.button("Clear lineup"):
+        st.session_state[lineup_key] = set()
+        _sync_checkbox_keys(set())
+        st.rerun()
+
+    if col_export.button("Export PDF"):
+        st.session_state["export_lineup_meet"] = selected_meet_id
+else:
+    # Read-only: only show PDF export
+    if st.button("Export PDF"):
+        st.session_state["export_lineup_meet"] = selected_meet_id
 
 # PDF export download
 if st.session_state.get("export_lineup_meet") == selected_meet_id:
     current_set = set(st.session_state.get(lineup_key, set()))
-    if current_set != saved_set:
+    if not read_only and current_set != saved_set:
         st.warning(
             "Your lineup has unsaved changes — save before exporting "
             "to get the latest version."
@@ -167,29 +219,19 @@ st.divider()
 # Shared data
 # ---------------------------------------------------------------------------
 
-# Compute live event counts from working set
 athlete_counts: dict[int, int] = {}
 for aid, eid in working_set:
     athlete_counts[aid] = athlete_counts.get(aid, 0) + 1
 
-# Season bests for seed display
 season_bests_map = db.get_season_best_per_event(season_id)
-
-# Roster lookup
 roster_all = db.get_roster(season_id)
 roster_by_id = {a["id"]: a for a in roster_all}
-
-# Batch-fetch all event assignments (avoids N+1 queries)
 all_event_assignments = db.get_all_athlete_events(season_id)
-
-# All events
 all_events = db.get_track_events()
 events_by_id = {e["id"]: e for e in all_events}
 
-# Map relay events to corresponding individual event IDs for season best lookup
-# e.g. "4x100 Relay" (gender M) → find the event_id for "100m" (gender M)
 RELAY_TO_INDIVIDUAL = {"4x100 Relay": "100m", "4x200 Relay": "200m", "4x400 Relay": "400m"}
-relay_sb_event_map: dict[int, int] = {}  # relay_event_id → individual_event_id
+relay_sb_event_map: dict[int, int] = {}
 for e in all_events:
     if e["event_type"] == "relay" and e["name"] in RELAY_TO_INDIVIDUAL:
         indiv_name = RELAY_TO_INDIVIDUAL[e["name"]]
@@ -198,29 +240,22 @@ for e in all_events:
                 relay_sb_event_map[e["id"]] = ie["id"]
                 break
 
-# Build mapping: event_id → list of athlete first names in working set
 event_athletes: dict[int, list[str]] = {}
 for aid, eid in working_set:
     a = roster_by_id.get(aid)
     if a:
         event_athletes.setdefault(eid, []).append(a["first_name"])
 
-# Total unique athletes in the lineup
 unique_athletes = set(aid for aid, eid in working_set)
 
 # ---------------------------------------------------------------------------
-# Top summary: Total athletes + Athlete event totals (moved from bottom)
+# Top summary (collapsible)
 # ---------------------------------------------------------------------------
 
 mc1, mc2 = st.columns([1, 3])
 mc1.metric("Total Athletes", len(unique_athletes))
 
-# ---------------------------------------------------------------------------
-# Athlete event totals (was at the bottom of each gender tab)
-# ---------------------------------------------------------------------------
-
-with st.container(border=True):
-    st.caption("Athlete event totals")
+with st.expander("Athlete event totals", expanded=False):
     for gender_val, gender_label in [("M", "Boys"), ("F", "Girls")]:
         gender_roster = [
             a for a in roster_all
@@ -263,11 +298,10 @@ with st.container(border=True):
             st.caption(f"Not in lineup ({len(not_in_lineup)}): {names}")
 
 # ---------------------------------------------------------------------------
-# Lineup progress (with names)
+# Lineup progress (collapsible)
 # ---------------------------------------------------------------------------
 
-with st.container(border=True):
-    st.caption("Lineup progress")
+with st.expander("Lineup progress", expanded=False):
     for gender_val, gender_label in [("M", "Boys"), ("F", "Girls")]:
         gender_events_prog = [
             e for e in all_events
@@ -308,7 +342,7 @@ st.divider()
 
 gender_tab_b, gender_tab_g = st.tabs(["Boys", "Girls"])
 
-TOP_N = 15  # Show top N athletes per event; expandable for full roster
+TOP_N = 15
 
 for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
     with gtab:
@@ -323,7 +357,6 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
             mx = max_for_event(event)
             is_relay = event["event_type"] == "relay"
 
-            # Determine which SB to sort by
             if is_relay:
                 sb_event_id = relay_sb_event_map.get(eid, eid)
                 indiv_name = RELAY_TO_INDIVIDUAL.get(event["name"], "")
@@ -331,21 +364,18 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                 sb_event_id = eid
                 indiv_name = ""
 
-            # Sort entire gender roster by SB for this event
-            # Athletes already checked always sort to top
             def _sort_key(a):
                 checked = (a["id"], eid) in working_set
                 sb = season_bests_map.get((a["id"], sb_event_id))
                 has_sb = sb is not None
                 return (
-                    0 if checked else 1,   # checked first
-                    0 if has_sb else 1,     # then those with a SB
-                    sb if has_sb else "z",  # then by SB value
+                    0 if checked else 1,
+                    0 if has_sb else 1,
+                    sb if has_sb else "z",
                 )
 
             sorted_roster = sorted(gender_roster, key=_sort_key)
 
-            # Count how many are currently selected
             event_selected = [
                 aid for aid, e in working_set if e == eid
             ]
@@ -358,16 +388,14 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
 
             with st.expander(
                 f"{header_color}  **{event['name']}** — {count_label} entered",
-                expanded=len(event_selected) < mx
+                expanded=len(event_selected) < mx and not read_only
             ):
                 if is_relay:
                     st.caption(f"Sorted by {indiv_name} season best")
 
-                # Split into top N and the rest
                 top_athletes = sorted_roster[:TOP_N]
                 remaining_athletes = sorted_roster[TOP_N:]
 
-                # Always include any checked athletes even if beyond top N
                 checked_beyond = [
                     a for a in remaining_athletes
                     if (a["id"], eid) in working_set
@@ -397,7 +425,7 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                     st.checkbox(
                         label,
                         value=is_checked,
-                        disabled=at_limit,
+                        disabled=read_only or at_limit,
                         key=f"lu_{selected_meet_id}_{aid}_{eid}",
                         on_change=_on_checkbox_change,
                         args=(aid, eid),
@@ -406,7 +434,7 @@ for gender_val, gtab in [("M", gender_tab_b), ("F", gender_tab_g)]:
                 for athlete in top_athletes:
                     _render_athlete(athlete)
 
-                if remaining_athletes:
+                if remaining_athletes and not read_only:
                     exp_key = f"expanded_show_all_{selected_meet_id}_{eid}"
                     is_expanded = st.session_state.get(exp_key, False)
 
