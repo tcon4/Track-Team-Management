@@ -567,6 +567,12 @@ def migrate_long_event_times() -> None:
         release_connection(conn)
 
 
+def migrate_recalculate_prs() -> None:
+    """Recalculate all is_pr flags after time format migrations."""
+    from db.results import recalculate_pr_flags
+    recalculate_pr_flags()
+
+
 _db_initialized = False
 
 def init_db() -> None:
@@ -580,6 +586,7 @@ def init_db() -> None:
     migrate_track_events()
     migrate_meet_columns()
     migrate_long_event_times()
+    migrate_recalculate_prs()
     conn = get_connection()
     try:
         row = fetchone(conn, "SELECT COUNT(*) AS cnt FROM school")

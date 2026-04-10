@@ -295,3 +295,202 @@ def generate_lineup_pdf(meet_id: int, season_id: int,
 
     doc.build(story)
     return buf.getvalue()
+
+
+def generate_checklist_pdf(meet_id: int, season_id: int,
+                           lineup_entries: list[dict] | None = None) -> bytes:
+    """Generate a meet day checklist PDF — athlete → events, sorted alphabetically.
+
+    Designed for kids to quickly find their name and see what they're running.
+    Portrait orientation, one section per gender.
+    """
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle,
+        Paragraph, Spacer, PageBreak
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    import io as _io
+
+    meet = get_meet(meet_id)
+    lineup = lineup_entries if lineup_entries is not None else get_lineup(meet_id)
+
+    conn = get_connection()
+    try:
+        athletes = {
+            r["id"]: r
+            for r in fetchall(conn, "SELECT * FROM athlete")
+        }
+        events = {
+            r["id"]: r
+            for r in fetchall(conn,
+                "SELECT * FROM track_event ORDER BY sort_order")
+        }
+    finally:
+        release_connection(conn)
+
+    # Build athlete → [event_name, ...] mapping, grouped by gender
+    gender_athletes: dict[str, dict[int, list[str]]] = {"M": {}, "F": {}}
+    for entry in lineup:
+        aid = entry["athlete_id"]
+        eid = entry["event_id"]
+        a = athletes.get(aid)
+        e = events.get(eid)
+        if a and e:
+            gender_athletes[a["gender"]].setdefault(aid, []).append(e["name"])
+
+    # Sort events within each athlete by sort_order
+    for gender_map in gender_athletes.values():
+        for aid in gender_map:
+            event_names = gender_map[aid]
+            event_names.sort(
+                key=lambda n: next(
+                    (e["sort_order"] for e in events.values() if e["name"] == n),
+                    999
+                )
+            )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "cl_title", parent=styles["Normal"],
+        fontSize=14, fontName="Helvetica-Bold",
+        alignment=TA_CENTER, spaceAfter=2
+    )
+    subtitle_style = ParagraphStyle(
+        "cl_subtitle", parent=styles["Normal"],
+        fontSize=10, fontName="Helvetica",
+        alignment=TA_CENTER, spaceAfter=8
+    )
+    section_style = ParagraphStyle(
+        "cl_section", parent=styles["Normal"],
+        fontSize=11, fontName="Helvetica-Bold",
+        spaceBefore=12, spaceAfter=4
+    )
+    name_style = ParagraphStyle(
+        "cl_name", parent=styles["Normal"],
+        fontSize=10, fontName="Helvetica-Bold",
+    )
+    event_style = ParagraphStyle(
+        "cl_event", parent=styles["Normal"],
+        fontSize=9, fontName="Helvetica",
+    )
+    check_style = ParagraphStyle(
+        "cl_check", parent=styles["Normal"],
+        fontSize=9, fontName="Helvetica",
+        alignment=TA_CENTER,
+    )
+    header_style = ParagraphStyle(
+        "cl_header", parent=styles["Normal"],
+        fontSize=9, fontName="Helvetica-Bold",
+    )
+
+    meet_name = meet["name"] if meet else "Meet"
+    meet_date = meet["meet_date"] if meet else ""
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
+    )
+
+    story = []
+    for gender, gender_label in [("M", "Boys"), ("F", "Girls")]:
+        if story:
+            story.append(PageBreak())
+
+        story.append(Paragraph(
+            f"Meet Day Checklist \u2014 {meet_name}", title_style
+        ))
+        story.append(Paragraph(
+            f"{meet_date}  \u00b7  {gender_label}", subtitle_style
+        ))
+
+        athlete_map = gender_athletes[gender]
+        if not athlete_map:
+            story.append(Paragraph("No athletes in lineup.", event_style))
+            continue
+
+        # Sort alphabetically by last name, first name
+        sorted_aids = sorted(
+            athlete_map.keys(),
+            key=lambda aid: (
+                athletes[aid]["last_name"].lower(),
+                athletes[aid]["first_name"].lower(),
+            )
+        )
+
+        # Build table: [#, Name, Events, ✓ columns for each event]
+        # Simpler approach: Name | Events (comma list) | checkbox columns
+        max_events = max(len(evts) for evts in athlete_map.values())
+
+        header_row = [
+            Paragraph("<b>#</b>", header_style),
+            Paragraph("<b>Athlete</b>", header_style),
+        ]
+        for i in range(max_events):
+            header_row.append(Paragraph(f"<b>Event {i+1}</b>", header_style))
+        header_row.append(Paragraph("<b>\u2713</b>", header_style))
+
+        data = [header_row]
+        for idx, aid in enumerate(sorted_aids, 1):
+            a = athletes[aid]
+            event_list = athlete_map[aid]
+            row = [
+                Paragraph(str(idx), event_style),
+                Paragraph(
+                    f"{a['last_name']}, {a['first_name']}",
+                    name_style
+                ),
+            ]
+            for i in range(max_events):
+                if i < len(event_list):
+                    row.append(Paragraph(event_list[i], event_style))
+                else:
+                    row.append(Paragraph("", event_style))
+            # Checkbox column (empty box for coach to check off)
+            row.append(Paragraph("\u25a1", check_style))
+            data.append(row)
+
+        n_cols = 2 + max_events + 1  # #, Name, events..., checkbox
+        # Column widths: narrow #, wide name, medium events, narrow check
+        num_width = 0.3 * inch
+        name_width = 1.8 * inch
+        check_width = 0.4 * inch
+        remaining = 7.3 * inch - num_width - name_width - check_width
+        event_width = remaining / max(max_events, 1)
+        col_widths = (
+            [num_width, name_width]
+            + [event_width] * max_events
+            + [check_width]
+        )
+
+        t = Table(data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("ALIGN",         (0, 0), (0, -1), "CENTER"),  # # column
+            ("ALIGN",         (-1, 0), (-1, -1), "CENTER"),  # check column
+            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f5f5f5")]),
+            ("FONTSIZE",      (0, 0), (-1, -1), 9),
+            ("TOPPADDING",    (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+
+        story.append(t)
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(
+            f"{len(sorted_aids)} athletes  \u00b7  "
+            f"{sum(len(athlete_map[a]) for a in sorted_aids)} total entries",
+            subtitle_style
+        ))
+
+    doc.build(story)
+    return buf.getvalue()

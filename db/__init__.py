@@ -38,11 +38,12 @@ from db.results import (
     save_track_result, get_meet_results, clear_meet_results,
     get_season_bests_track, get_season_best_per_event,
     get_season_bests, get_athlete_profile,
-    is_track_pr,
+    is_track_pr, recalculate_pr_flags,
+    get_athlete_meet_counts,
 )
 
 # Lineup
 from db.lineup import (
     get_lineup, save_lineup, get_athlete_event_counts,
-    auto_suggest_lineup, generate_lineup_pdf,
+    auto_suggest_lineup, generate_lineup_pdf, generate_checklist_pdf,
 )

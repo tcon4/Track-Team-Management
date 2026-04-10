@@ -199,6 +199,73 @@ def get_season_best_per_event(season_id: int) -> dict[tuple, str]:
     return result
 
 
+def recalculate_pr_flags() -> int:
+    """Recalculate all is_pr flags using numeric comparison.
+
+    For each (athlete, event) group, marks the single best result as PR.
+    Running/relay: lowest time. Field: highest value.
+    Returns the number of flags changed.
+    """
+    conn = get_connection()
+    try:
+        rows = fetchall(conn,
+            """SELECT tr.id, tr.athlete_id, tr.event_id,
+                      tr.result_value, tr.is_pr,
+                      te.event_type, m.meet_date
+               FROM track_result tr
+               JOIN track_event te ON te.id = tr.event_id
+               JOIN meet m ON m.id = tr.meet_id
+               ORDER BY tr.athlete_id, tr.event_id, m.meet_date""")
+    finally:
+        release_connection(conn)
+
+    # Group by (athlete, event)
+    grouped: dict[tuple, list[dict]] = {}
+    for r in rows:
+        key = (r["athlete_id"], r["event_id"])
+        grouped.setdefault(key, []).append(r)
+
+    updates = []
+    for (aid, eid), results in grouped.items():
+        is_field = results[0]["event_type"] == "field"
+
+        # Find the best result (earliest date wins ties)
+        best_id = None
+        best_val = None
+        for r in results:
+            try:
+                val = _parse_result(r["result_value"])
+            except (ValueError, ZeroDivisionError):
+                continue
+            if best_val is None:
+                best_val = val
+                best_id = r["id"]
+            elif is_field and val > best_val:
+                best_val = val
+                best_id = r["id"]
+            elif not is_field and val < best_val:
+                best_val = val
+                best_id = r["id"]
+
+        # Set is_pr=1 for the best, is_pr=0 for all others
+        for r in results:
+            should_be_pr = 1 if r["id"] == best_id else 0
+            if r["is_pr"] != should_be_pr:
+                updates.append((should_be_pr, r["id"]))
+
+    if updates:
+        conn = get_connection()
+        try:
+            for new_flag, row_id in updates:
+                execute(conn,
+                    "UPDATE track_result SET is_pr=? WHERE id=?",
+                    (new_flag, row_id))
+        finally:
+            release_connection(conn)
+
+    return len(updates)
+
+
 def get_season_bests(season_id: int) -> dict[int, str]:
     """XC season bests (finish_time based)."""
     conn = get_connection()
@@ -215,6 +282,25 @@ def get_season_bests(season_id: int) -> dict[int, str]:
     finally:
         release_connection(conn)
     return {row["athlete_id"]: row["best_time"] for row in rows}
+
+
+def get_athlete_meet_counts(season_id: int) -> dict[int, int]:
+    """Returns {athlete_id: number_of_meets_with_results} for the season.
+
+    Excludes the 'Tryouts' pseudo-meet so only real competitions count.
+    """
+    conn = get_connection()
+    try:
+        rows = fetchall(conn,
+            """SELECT tr.athlete_id, COUNT(DISTINCT tr.meet_id) AS meet_count
+               FROM track_result tr
+               JOIN meet m ON m.id = tr.meet_id
+               WHERE m.season_id = ? AND m.name != 'Tryouts'
+               GROUP BY tr.athlete_id""",
+            (season_id,))
+    finally:
+        release_connection(conn)
+    return {r["athlete_id"]: r["meet_count"] for r in rows}
 
 
 def get_athlete_profile(athlete_id: int, season_id: int) -> dict:
@@ -236,27 +322,52 @@ def get_athlete_profile(athlete_id: int, season_id: int) -> dict:
             (athlete_id, season_id))
 
         bests_rows = fetchall(conn,
-            """SELECT te.name AS event_name, te.event_type,
-                      MIN(tr.result_value) AS season_best,
-                      MAX(tr.is_pr) AS has_pr
+            """SELECT te.name AS event_name, te.event_type, te.sort_order,
+                      tr.result_value, tr.is_pr
                FROM track_result tr
                JOIN meet m       ON m.id  = tr.meet_id
                JOIN track_event te ON te.id = tr.event_id
                WHERE tr.athlete_id = ? AND m.season_id = ?
-               GROUP BY tr.event_id, te.name, te.event_type, te.sort_order
                ORDER BY te.sort_order""",
             (athlete_id, season_id))
     finally:
         release_connection(conn)
 
+    # Compute season bests using numeric comparison (not string MIN)
+    grouped_bests: dict[str, list[dict]] = {}
+    for row in bests_rows:
+        grouped_bests.setdefault(row["event_name"], []).append(row)
+
+    season_bests = {}
+    for event_name, rows in grouped_bests.items():
+        is_field = rows[0]["event_type"] == "field"
+        best_val = None
+        best_str = None
+        has_pr = False
+        for r in rows:
+            if r["is_pr"]:
+                has_pr = True
+            try:
+                val = _parse_result(r["result_value"])
+            except (ValueError, ZeroDivisionError):
+                continue
+            if best_val is None:
+                best_val = val
+                best_str = r["result_value"]
+            elif is_field and val > best_val:
+                best_val = val
+                best_str = r["result_value"]
+            elif not is_field and val < best_val:
+                best_val = val
+                best_str = r["result_value"]
+        if best_str:
+            season_bests[event_name] = {
+                "result_value": best_str,
+                "has_pr": has_pr,
+            }
+
     return {
         "athlete": athlete or {},
-        "season_bests": {
-            row["event_name"]: {
-                "result_value": row["season_best"],
-                "has_pr": bool(row["has_pr"]),
-            }
-            for row in bests_rows
-        },
+        "season_bests": season_bests,
         "history": history,
     }

@@ -134,7 +134,9 @@ def _on_checkbox_change(aid: int, eid: int):
 # ---------------------------------------------------------------------------
 
 if not read_only:
-    col_suggest, col_save, col_clear, col_export = st.columns([2, 2, 2, 2])
+    col_suggest, col_save, col_clear, col_export, col_checklist = st.columns(
+        [2, 2, 2, 2, 2]
+    )
 
     if col_suggest.button("Auto-suggest lineup", type="secondary"):
         suggestion = db.auto_suggest_lineup(
@@ -177,12 +179,18 @@ if not read_only:
 
     if col_export.button("Export PDF"):
         st.session_state["export_lineup_meet"] = selected_meet_id
-else:
-    # Read-only: only show PDF export
-    if st.button("Export PDF"):
-        st.session_state["export_lineup_meet"] = selected_meet_id
 
-# PDF export download
+    if col_checklist.button("Meet Checklist"):
+        st.session_state["export_checklist_meet"] = selected_meet_id
+else:
+    # Read-only: show both export options
+    rc1, rc2 = st.columns(2)
+    if rc1.button("Export PDF"):
+        st.session_state["export_lineup_meet"] = selected_meet_id
+    if rc2.button("Meet Checklist"):
+        st.session_state["export_checklist_meet"] = selected_meet_id
+
+# PDF export download — lineup grid
 if st.session_state.get("export_lineup_meet") == selected_meet_id:
     current_set = set(st.session_state.get(lineup_key, set()))
     if not read_only and current_set != saved_set:
@@ -190,7 +198,7 @@ if st.session_state.get("export_lineup_meet") == selected_meet_id:
             "Your lineup has unsaved changes — save before exporting "
             "to get the latest version."
         )
-    with st.spinner("Generating PDF…"):
+    with st.spinner("Generating PDF..."):
         try:
             lineup_entries = [
                 {"athlete_id": aid, "event_id": eid}
@@ -202,7 +210,7 @@ if st.session_state.get("export_lineup_meet") == selected_meet_id:
             )
             meet_slug = selected_meet["name"].replace(" ", "_").lower()
             st.download_button(
-                label="⬇ Download lineup PDF",
+                label="Download lineup PDF",
                 data=pdf_bytes,
                 file_name=f"lineup_{meet_slug}.pdf",
                 mime="application/pdf",
@@ -212,6 +220,37 @@ if st.session_state.get("export_lineup_meet") == selected_meet_id:
         except Exception as ex:
             st.error(f"PDF generation failed: {ex}")
             st.session_state["export_lineup_meet"] = None
+
+# PDF export download — meet day checklist
+if st.session_state.get("export_checklist_meet") == selected_meet_id:
+    current_set = set(st.session_state.get(lineup_key, set()))
+    if not read_only and current_set != saved_set:
+        st.warning(
+            "Your lineup has unsaved changes — save before exporting "
+            "to get the latest version."
+        )
+    with st.spinner("Generating checklist..."):
+        try:
+            lineup_entries = [
+                {"athlete_id": aid, "event_id": eid}
+                for aid, eid in current_set
+            ]
+            checklist_bytes = db.generate_checklist_pdf(
+                selected_meet_id, season_id,
+                lineup_entries=lineup_entries
+            )
+            meet_slug = selected_meet["name"].replace(" ", "_").lower()
+            st.download_button(
+                label="Download meet checklist",
+                data=checklist_bytes,
+                file_name=f"checklist_{meet_slug}.pdf",
+                mime="application/pdf",
+                type="primary",
+            )
+            st.session_state["export_checklist_meet"] = None
+        except Exception as ex:
+            st.error(f"Checklist generation failed: {ex}")
+            st.session_state["export_checklist_meet"] = None
 
 st.divider()
 

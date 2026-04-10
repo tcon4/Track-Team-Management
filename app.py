@@ -96,6 +96,54 @@ if sport == "Track" and bests:
             st.page_link("pages/5_Season_Bests.py",
                          label=f"View all {len(prs)} PRs →")
 
+# --- Participation tracker ---
+if sport == "Track":
+    roster = db.get_roster(season_id)
+    active_roster = [a for a in roster if a["status"] == "active"]
+    meet_counts = db.get_athlete_meet_counts(season_id)
+    total_real_meets = len(past_meets)
+
+    # Athletes with 0 or 1 meets
+    low_participation = [
+        (a, meet_counts.get(a["id"], 0))
+        for a in active_roster
+        if meet_counts.get(a["id"], 0) <= 1
+    ]
+
+    if low_participation and total_real_meets >= 1:
+        st.divider()
+        with st.expander(
+            f"**Participation watch** — {len(low_participation)} athletes "
+            f"with 0-1 meets",
+            expanded=False,
+        ):
+            zero_meets = [(a, c) for a, c in low_participation if c == 0]
+            one_meet = [(a, c) for a, c in low_participation if c == 1]
+
+            if zero_meets:
+                st.markdown("**No meets yet:**")
+                for a, _ in sorted(
+                    zero_meets,
+                    key=lambda x: (x[0]["last_name"], x[0]["first_name"]),
+                ):
+                    gender_label = "B" if a["gender"] == "M" else "G"
+                    st.caption(
+                        f"{a['last_name']}, {a['first_name']} "
+                        f"({gender_label}, Gr. {a['grade']})"
+                    )
+
+            if one_meet:
+                st.markdown("**1 meet only:**")
+                for a, _ in sorted(
+                    one_meet,
+                    key=lambda x: (x[0]["last_name"], x[0]["first_name"]),
+                ):
+                    gender_label = "B" if a["gender"] == "M" else "G"
+                    st.caption(
+                        f"{a['last_name']}, {a['first_name']} "
+                        f"({gender_label}, Gr. {a['grade']})"
+                    )
+
 # --- Quick links ---
 st.divider()
 st.markdown("**Quick Links**")
